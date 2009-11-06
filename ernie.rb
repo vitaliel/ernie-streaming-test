@@ -116,11 +116,38 @@ class Ernie
       if iruby.size == 4 && iruby[0] == :call
         mod, fun, args = iruby[1..3]
         self.log("-> " + iruby.inspect)
+
         begin
           res = self.dispatch(mod, fun, args)
-          oruby = t[:reply, res]
-          self.log("<- " + oruby.inspect)
-          write_berp(output, oruby)
+
+          if res.is_a?(IO)
+            self.log("<- byte stream")
+
+            begin
+              info = t[:info, :stream, []]
+              self.log("<- " + info.inspect)
+              write_berp(output, info)
+              write_berp(output, t[:reply, []])
+
+              enc = BERT::Encode.new(output)
+
+              while (buf = res.read(4 * 1024)) && buf.length > 0
+                #self.log("<- byte stream write #{buf.length} bytes")
+                enc.write_4(buf.length)
+                enc.write_string(buf)
+              end
+
+              #self.log("<- byte stream end, 4 null bytes")
+              enc.write_4(0)
+            ensure
+              res.close
+            end
+          else
+            oruby = t[:reply, res]
+            self.log("<- " + oruby.inspect)
+
+            write_berp(output, oruby)
+          end
         rescue ServerError => e
           oruby = t[:error, t[:server, 0, e.class.to_s, e.message, e.backtrace]]
           self.log("<- " + oruby.inspect)
